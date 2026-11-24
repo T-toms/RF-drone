@@ -1,0 +1,20 @@
+# 白名单方式：默认忽略一切，只放行代码和文档
+*
+!*/
+!.gitignore
+!*.py
+!*.m
+!*.ps1
+!*.sh
+!*.cmd
+!*.md
+
+# 无论什么类型都排除的目录
+.venv/
+__pycache__/
+tmp/
+.agents/
+.dsh-codex/
+.claude/
+literature_review_from_scratch/tmp/
+literature_review_from_scratch/deep_research_redo/readers/

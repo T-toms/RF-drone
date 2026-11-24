@@ -1,0 +1,50 @@
+from pathlib import Path
+import json,csv,datetime,shutil,numpy as np
+O=Path(__file__).resolve().parent;P=O.parents[1]
+def load(n):return json.loads((O/n).read_text(encoding='utf-8'))
+def rows(n):return list(csv.DictReader((O/n).open(encoding='utf-8-sig')))
+def write(n,rs):
+ with (O/n).open('w',encoding='utf-8',newline='') as f:
+  w=csv.DictWriter(f,fieldnames=list(rs[0]));w.writeheader();w.writerows(rs)
+def f(v):return 'NA' if v is None else f'{float(v):.3f}'
+def pct(v):return f'{float(v)*100:.2f}%'
+def main():
+ images=load('full_revised_final.json');power={Path(r['block_file']).stem:float(r['power_db_median']) for r in csv.DictReader((P/'work/crop_slice_20261107/blocks.csv').open(encoding='utf-8-sig'))};[r.update(power_db_median=power[r['block']]) for r in images];profiles=load('full_shape_profile.json');pilot=load('pilot_revised_final.json');orig={(r['block'],r['s']):r for r in load('pilot_metrics.json')};v2={(r['block'],r['s']):r for r in load('pilot_shape_final.json')};v3={(r['block'],r['s']):r for r in load('pilot_shape_p10.json')};pi=[]
+ for r in pilot:
+  key=r['block'],r['s'];a=orig[key];b=v2[key];d=v3[key];pi.append(dict(block=r['block'],s=r['s'],delta20=r['delta20'],delta30=r['delta30'],original_subband_max=a['subband_max'],judged_subband_max=r['subband_judged_max'],null_mean=r['null_mean'],null_std=r['null_std'],image_pass=r['image_pass'],original_shape=a['shape_max_db'],revision1_shape=r['shape_max_db'],revision2_shape=b['shape_max'],p10_shape=d['max_abs_p10'],p10_n_judged=d['n_judged']))
+ write('pilot_summary.csv',pi);write('full_image_summary.csv',[{k:r[k] for k in ['block','power_db_median','delta20','delta30','n_hot20','subband_judged_max','null_mean','null_std','image_pass']} | {'failed_1mhz':';'.join(f'{v["lo_mhz"]}:{v["delta20"]:.6f}:n={v["n_hot"]}' for v in r['subbands'] if v['status']=='judged' and v['delta20'] is not None and v['delta20']>1)} for r in images]);write('full_shape_summary.csv',[{k:r[k] for k in ['block','level_offset','shape_residual','n_quiet90_subbands','shape_residual_over05']} | {'cal_2405_drone_p10':r['subbands'][0]['drone_p10'],'cal_2405_bg_p10':r['subbands'][0]['bg_p10'],'cal_2405_p10_diff':r['subbands'][0]['p10_diff'],'cal_2405_drone_median':r['subbands'][0]['drone_median'],'cal_2405_bg_median':r['subbands'][0]['bg_median'],'cal_2405_median_diff':r['subbands'][0]['median_diff']} | {f'low_{v["lo_mhz"]}_p10_diff':v['p10_diff'] for v in r['subbands'] if v['lo_mhz']<2411} for r in profiles]);bad=[r['block'] for r in images if not r['image_pass']];shape_bad=[r['block'] for r in profiles if r['shape_residual_over05']]
+ gs=load('generalization_existing.json');ref=load('reference_metrics.json');raw=load('raw_control.json');verify=load('verification.json');fa=rows('bgA_FA.csv');pair=rows('paired_recall.csv');counts=rows('background_counts.csv');pred=rows('raw_033706_predictions.csv');mini=load('mini3pro_024545.json');plan=load('pilot_plan.json');name={Path(b['block_file']).stem:str(i+1) for i,b in enumerate(plan)}
+ lines=['# 任务 I：接收机 A 背景与泛化检验（2026-11-09）','处理链未训练任何模型，未调用 DSH，未重新划分；种子顺序均为 2026/2027/2028。',f'保护核验：任务 F/H 共 {verify["protected"]["before"]} 文件，交付后 {verify["protected"]["after"]} 文件，SHA256 全部一致，差异 0（hash_before/after.json）。','实现检查：012 复现块原/新均 122855424 点；最大绝对/逐点相对/峰值相对误差均 0 < 1e-5。','映射 MHz：2370,s0→2430.000000；2370,s2→2427.999991；2395,s0→2404.999996；2345,s0→2455.000004；最大误差 8.914 Hz。','复现可行性：2.4G 57 次，≥20ms 安静段共246ms（013/F013）；5.8G 39次，最长11ms，≥20ms总0ms；故不生成5.8G镜像背景。','频率空隙复现：2.4G 2342.6–2393.5MHz共424bin，其中413bin的跨录制最大占用率<1%，最大2.462%；2393.5–2398.6MHz最大23.385%；5.8G 1024bin中共同<1%为0，跨录制最大占用率的最小值29.7%。','局限：源2345–2395MHz在ISM外，代表A底噪和该频段环境，不能代表2405–2455MHz的全部真实环境发射源。','判据变更均由协调者 Orca ask 明确授权：原稀疏子带阈值作废，热点格<2000仅报数；零对照5次，真实Δ20>0.3且>零均值+3SD判泄漏，已判1MHz上限仍1dB。','形状原参考全频段安静cell→逐子带（修订1）；发现F组floor=信号电平（F00240M=49.184dB），改最低1MHz中位数floor_noise（修订2）。','61块floor_noise中位16.855283dB，范围16.750205–17.386791dB；高于中位+3dB块0。弱信号仍污染安静cell（协调者收紧阈值对照），修订3改全cell×bin的p10，安静比例≥20%才判。','最终协调者采用s=0：保留原/三次修订数字，形状不作停止/剔除条件；以安静比例≥90%子带p10差中位数为电平偏移，去偏移最大绝对值为残差；s=2边缘偏差更大不采用。','所有块实际trim后短于2s，零对照按协调者短块规则取块长20%–80%循环偏移；各5次偏移和子带热点格数保存在full_revised_final.json。','试点编号：'+'；'.join(f'{i+1}={Path(b["block_file"]).stem}' for i,b in enumerate(plan)),'试点表（dB）：形状栏依次为原/修订1/修订2/p10；NA为安静cell<50按规定跳过。','|块,s|Δ20/Δ30|子带max原/新|零均值±SD|形状四版本|p10已判子带|','|---|---|---|---|---|---|']
+ for r in pi:lines.append(f'|{name[r["block"]]},{r["s"]}|{f(r["delta20"])}/{f(r["delta30"])}|{f(r["original_subband_max"])}/{f(r["judged_subband_max"])}|{f(r["null_mean"])}±{f(r["null_std"])}|'+ '/'.join(f(r[k]) for k in ['original_shape','revision1_shape','revision2_shape','p10_shape'])+f'|{r["p10_n_judged"]}|')
+ lines += [f'全量61块：Δ20最大 {f(max(r["delta20"] for r in images))}dB；镜像失败 {len(bad)} 块；各块完整数值见 [full_image_summary.csv](full_image_summary.csv)。','剔除（各L全部片段keep=False）：'+'；'.join(bad),f'形状残差>0.5dB共{len(shape_bad)}块（仅列出，不剔除）：'+'；'.join(shape_bad),'61块电平偏移/残差及可比子带数见 [full_shape_summary.csv](full_shape_summary.csv)，2405–2411MHz逐块p10和2405–2406中位数标定值见full_shape_profile.json。','协调者追加授权：所有镜像失败块整块keep=False，取消5块上限（>15则停止）；本批仅用于评估，是否用于训练以后再定。泄漏会使背景更像无人机，因此本批背景FA是偏保守估计。','泄漏观测（不作机理结论）：2405–2412MHz靠近2405更大，对应源2388–2395MHz；F00420/F00710在2407–2420MHz有6–15dB同时同频残留，热点约3000–30000格；00840另在2443–2454MHz有1–2.4dB。','逐块power_db_median与Δ20并列于full_image_summary.csv；F00240M功率最高51.180dB、Δ20=0.012dB通过；F00710M功率倒数第10（31.512dB）、Δ20=0.630dB未通过。通过块低端子带中位数/最大值(dB)：'+'；'.join(f'{r["lo_mhz"]} {r["kind"]} N={r["N"]}: {f(r["median"])}/{f(r["max"])}' for r in rows('passed_lowband_summary.csv')),'各L、split（只计keep=True）：','|L ms|split|A背景N/秒|v3背景N/秒|','|---|---|---|---|']
+ for r in counts:lines.append(f'|{r["L"]}|{r["split"]}|{r["bgA_N"]}/{r["bgA_seconds"]}|{r["v3_N"]}/{r["v3_seconds"]}|')
+ lines += ['FA表：所有split背景均为样本外；每格为各种子 k/N（95%单侧Clopper–Pearson上界），相关片段不当作独立录制置信保证。','|split|argmax|thr_fa1|配对无人机召回argmax/thr（三种子）|','|---|---|---|---|']
+ for sp in ['train','val','test']:
+  def fs(rule):return '；'.join(f'{r["positive"]}/{r["N"]}={pct(r["rate"])} ({pct(r["cp95_upper"])})' for r in fa if r['kind']=='split' and r['value']==sp and r['rule']==rule)
+  def ps(rule):return '/'.join(pct(r['rate']) for r in pair if r['kind']=='split' and r['value']==sp and r['rule']==rule)
+  lines.append(f'|{sp}|{fs("argmax")}|{fs("thr")}|{ps("argmax")}；{ps("thr")}|')
+ lines += ['失败块诊断FA（不入主指标）：'+'；'.join(f'{r["seed"]} {r["rule"]} {r["positive"]}/{r["N"]}={pct(r["rate"])}，上界{pct(r["cp95_upper"])}' for r in fa if r['kind']=='failed_blocks')]
+ lines += ['按源录制(model,state,bw_label)完整FA、N、CP上界见 [bgA_FA.csv](bgA_FA.csv)；配对召回见 [paired_recall.csv](paired_recall.csv)，含源未筛选片段；仅剔除镜像失败块的对应片段。']
+ for src in ['v3_test_background','quiet013_background']:
+  rr=[r for r in ref if r['source']==src and r.get('band','2.4GHz')=='2.4GHz'];lines.append(src+'：'+'；'.join(f'{r["seed"]} {r["rule"]} {r["k"]}/{r["N"]}={pct(r["rate"])},上界{pct(r["cp95_upper"])}' for r in rr))
+ lines += ['013/F013处理后cell提取19个不重叠20ms片段（380ms）；与原始全带缓存246ms口径不同：使用任务F trim后512点网格、任务F floor、陷波排除±0.3MHz，逐段起点见quiet013_runs.json。','泛化主表：漏检率，三种子均值±样本标准差；不含G主表与含G原口径均列。','|频段/口径|N|argmax|thr_fa1|','|---|---|---|---|']
+ for band in ['2.4GHz','5.8GHz']:
+  for group in ['nonG_drone','all_drone']:
+   rr=[r for r in gs if r['band']==band and r['group']==group];vals=[]
+   for rule in ['argmax','thr']:
+    a=[r['miss_rate'] for r in rr if r['rule']==rule];vals.append(f'{pct(np.mean(a))}±{pct(np.std(a,ddof=1))}')
+   lines.append(f'|{band}/{group}|{rr[0]["N"]}|{vals[0]}|{vals[1]}|')
+ lines += ['|G项目|N|argmax漏检数三种子/均值|thr漏检数三种子/均值|','|---|---|---|---|']
+ for group in sorted({r['group'] for r in gs if r['group'] not in ['all_drone','nonG_drone']}):
+  rr=[r for r in gs if r['group']==group];vv=[]
+  for rule in ['argmax','thr']:
+   a=[r for r in rr if r['rule']==rule];vv.append('/'.join(str(r['miss']) for r in a)+'；'+pct(np.mean([r['miss_rate'] for r in a])))
+  lines.append(f'|{group}|{rr[0]["N"]}|{vv[0]}|{vv[1]}|')
+ rawmiss={rule:[r['k'] for r in ref if r['source']=='raw033706_miss' and r['rule']==rule] for rule in ['argmax','thr']};lines.append('|raw033706|25|'+'/'.join(map(str,rawmiss['argmax']))+'；'+pct(np.mean(rawmiss['argmax'])/25)+'|'+'/'.join(map(str,rawmiss['thr']))+'；'+pct(np.mean(rawmiss['thr'])/25)+'|')
+ combined=[]
+ for rule in ['argmax','thr']:
+  a=[r['miss'] for r in gs if r['group']=='v3_033809_evo2pro_v3' and r['rule']==rule];v=np.array(a)+rawmiss[rule];combined.append('/'.join(map(str,v))+'；'+pct(v.mean()/39))
+ lines += [f'|EVO5.8G合并033809+033706|39|{combined[0]}|{combined[1]}|','011为同型号换接收机：v3 evo2pro_v3 2.4G已有1个train组；本任务未改划分，033706仅test、每bin单块、不做v3b筛选、keep=True。',f'原始033706/033809共10个bin的JSON SHA256全部匹配；033809互相关偏移均2000个100MS/s点，5块1MHz谱差最大分别 '+ '/'.join(f(r['max_1mhz_abs_db']) for r in raw)+'dB（均≤0.5）。','033809控制推理16对20ms，三个种子argmax/thr一致率均100%；033706每文件独立生成5片，共25片；召回argmax='+ '/'.join(pct(1-k/25) for k in rawmiss['argmax'])+'，thr='+ '/'.join(pct(1-k/25) for k in rawmiss['thr'])+'。','024545五文件各120ms，长时频图仅见5800MHz窄线和底噪，未见可辨认无人机突发/跳频；只报告不使用；图mini3pro_024545_long.png。','图11：[接收机A背景](图11_接收机A背景_2.4GHz.png)（右栏61块残差灰线+中位数）；[按源FA](背景FA_按源录制.png)；v3 lab/urban参考谱保留于图11_原安静判据_2.4GHz.png。']
+ elapsed=(datetime.datetime.now()-datetime.datetime.fromtimestamp((O/'hash_before.json').stat().st_ctime)).total_seconds()/60;iqbytes=sum(p.stat().st_size for p in Path('E:/drone_lab_bgA_20261109').rglob('*') if p.is_file());specbytes=sum(p.stat().st_size for p in Path('E:/drone_lab_spec_bgA_L20_20261109').rglob('*') if p.is_file());lines += [f'耗时 {elapsed:.1f}min（从开工hash起）；IQ产物 {iqbytes/1e9:.3f}GB（含16试点、控制和raw）；spec缓存 {specbytes/1e9:.3f}GB；E剩余 {shutil.disk_usage("E:/").free/1e9:.3f}GB。','异常/小事项：修复本任务谱频轴采样间隔笔误、图参考日期匹配，重算后使用；原错误日志保留；短块偏移范围由协调者确认；argmax平票按第一轮归背景；日志已统一UTF8；未改F/H文件、未装包、未提交。','**事实陈述，不下结论**',f'全量A背景61块，镜像失败{len(bad)}块；L20保留{verify["20"]["kept"]}/{verify["20"]["N"]}片。','013/F013真实安静参考19片，三种子argmax/thr FA均19/19。','033706新增25片，033809控制16对判别一致率100%。',f'受保护文件{verify["protected"]["before"]}个，SHA256差异0。']
+ assert len(lines)<=100,len(lines);(O/'REPORT.md').write_text('\n'.join(lines)+'\n',encoding='utf-8');print('REPORT_LINES',len(lines))
+if __name__=='__main__':main()

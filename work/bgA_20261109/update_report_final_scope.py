@@ -1,0 +1,6 @@
+﻿from pathlib import Path
+p=Path('work/bgA_20261109/report.py');s=p.read_text(encoding='utf-8-sig');s=s.replace("images=load('full_revised_final.json');profiles=", "images=load('full_revised_final.json');power={Path(r['block_file']).stem:float(r['power_db_median']) for r in csv.DictReader((P/'work/crop_slice_20261107/blocks.csv').open(encoding='utf-8-sig'))};[r.update(power_db_median=power[r['block']]) for r in images];profiles=")
+s=s.replace("['block','delta20','delta30','n_hot20'","['block','power_db_median','delta20','delta30','n_hot20'")
+s=s.replace("lines += ['按源录制", "lines += ['失败块诊断FA（不入主指标）：'+'；'.join(f'{r[\"seed\"]} {r[\"rule\"]} {r[\"positive\"]}/{r[\"N\"]}，上界{pct(r[\"cp95_upper\"])}' for r in fa if r['kind']=='failed_blocks')]\n lines += ['按源录制")
+s=s.replace("'各L、split（只计keep=True）：'", "'协调者追加授权：所有镜像失败块整块keep=False，取消5块上限（>15则停止）；本批仅用于评估，是否用于训练以后再定。泄漏会使背景更像无人机，因此本批背景FA是偏保守估计。','泄漏观测（不作机理结论）：2405–2412MHz靠近2405更大，对应源2388–2395MHz；F00420/F00710在2407–2420MHz有6–15dB同时同频残留，热点约3000–30000格；00840另在2443–2454MHz有1–2.4dB。','逐块power_db_median与Δ20并列于full_image_summary.csv；通过块lo=2405/2406/2407MHz子带分布中位数/最大值见passed_lowband_summary.csv（同时列全部非空和热点>=2000口径）。','各L、split（只计keep=True）：'")
+p.write_text(s,encoding='utf-8')

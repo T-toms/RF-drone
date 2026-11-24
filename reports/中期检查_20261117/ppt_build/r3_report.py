@@ -1,0 +1,48 @@
+﻿from pathlib import Path
+import re,json,hashlib,datetime,zipfile,xml.etree.ElementTree as E,ast
+from PIL import Image,ImageDraw
+B=Path(__file__).resolve().parent;D=B.parent;R=B.parents[2];P=D/'ppt_preview'
+a=json.loads((B/'r3_delivery_audit.json').read_text(encoding='utf-8'));form=json.loads((B/'r3_form_readback.json').read_text(encoding='utf-8'));md=(D/'中期检查表_一二三项_原稿.md').read_text(encoding='utf-8')
+xmltexts=[]
+with zipfile.ZipFile(D/'中期答辩_模板稿.pptx') as z:
+ for n in z.namelist():
+  if re.match(r'ppt/(slides/slide\d+|notesSlides/notesSlide\d+)\.xml$',n):xmltexts+=[''.join(x.text or '' for x in E.fromstring(z.read(n)).iter() if x.tag.endswith('}t'))]
+text='\n'.join(xmltexts)+'\n'+md
+ban=['F组','F5组','Z组','R组','bgA','bgB','v3','data/','nonG','C1','argmax','thr_fa1','捷径','shortcut','Shortcut','阳性对照','AUC','召回','recall','虚警','种子','seed','嵌入层拼接','Codex','任务书','worker']
+counts={t:text.count(t) for t in ban}
+# Short codes are matched as standalone experiment identifiers, excluding standard bibliographic initials/types.
+nonrefs='\n'.join(xmltexts)+'\n'+'\n'.join(l for l in md.splitlines() if not re.match(r'^\[\d+\]',l))
+for code in ['La','Lb','J','H','L','M','W','B1','B2b']:counts[code+'（独立实验代号）']=len(re.findall(r'(?<![A-Za-z0-9-])'+code+r'(?![A-Za-z0-9-])',nonrefs))
+extract=(R/'work/fusionB_20261110/extract.py').read_text(encoding='utf-8-sig');names=ast.literal_eval(re.search(r'NAMES=(\[.*?\])',extract)[1]);counts.update({x:text.count(x) for x in names})
+assert not any(counts.values()),{k:v for k,v in counts.items() if v}
+orig=json.loads((B/'r3_originals.json').read_text(encoding='utf-8'));now={p.name:{'size':p.stat().st_size,'mtime_ns':p.stat().st_mtime_ns,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()} for p in [D/x for x in orig]};assert orig==now
+assert form['pages']==4 and form['schedule_match'] and form['cells']['11_complete'] and form['cells']['12_complete']
+assert all(150<=d['note_chars']<=250 and d['min_font']>=10 for d in a)
+required=['1×256×256','64×128×128','64×64×64','128×32×32','256×16×16','512×8×8','512','64','576'];net='\n'.join(a[4]['texts']);assert all(v in net for v in required)
+for pat in ['r3_round1_??.png','r3_round2_??.png','r3_??.png']:
+ files=list(P.glob(pat));assert len(files)==19 and all(Image.open(p).size==(1920,1080) for p in files)
+contact=Image.new('RGB',(1920,1450),'#dfe5ea');dr=ImageDraw.Draw(contact)
+for i in range(19):
+ im=Image.open(P/f'r3_{i+1:02d}.png');x=i%4*480;y=i//4*290;contact.paste(im.resize((480,270)),(x,y));dr.text((x+8,y+271),str(i+1),fill='black')
+contact.save(P/'contact_r3.png')
+first=md.split('## 一')[1].split('## 二')[0];firstn=len(re.sub(r'\s|\*|#','',first));assert 1200<=firstn<=1600
+pc=[]
+for m in re.finditer(r'\*\*([1-5]\..*?)\*\*(.*?)(?=\n\*\*|\n###)',md,re.S):pc.append(len(re.sub(r'\s','',m[2])))
+assert all(200<=x<=300 for x in pc),pc
+lines=['# 中期检查表与答辩PPT R3验收报告','', '交付：`../中期答辩_模板稿.pptx`，19页；`../中期检查表_已填.doc`，4页。最终预览为 `../ppt_preview/r3_01.png` 至 `r3_19.png`（全部1920×1080），总览 `contact_r3.png`。', '', '## 第4节逐项自查','', '| 项目 | 结果 / 证据 |','|---|---|','| 禁用词 | 所有指定词与19个英文特征变量名，文本和备注扫描均为0；详见下表和r3_checks.json。图片标签另逐张目检，英文变量、背景代号已改中文。 |','| 两轮逐页预览 | r3_round1_01–19与r3_round2_01–19已逐页打开；第1轮改网络文字、图片标签、横轴拥挤，第2轮改连线、边框、结论位置与渐变；最终再复开交付文件导出r3_01–19并复查改页。 |','| 网络图尺寸 | 输入1×256×256→64×128×128→64×64×64→64×64×64→128×32×32→256×16×16→512×8×8→512→512；手工分支10→64；拼接576→2，逐项与R3第5页一致。 |','| 科研风图形 | 第3/4/5页为可编辑原生形状，白底、蓝系浅填充、深灰0.85 pt细箭头和虚线圆角组框；中文微软雅黑、西文Arial，尺寸10 pt灰色；无阴影、渐变或3D。第16页默认渐变已改纯色。 |','| 第13页箭头 | 从“特征全置零”94.9%柱顶指向“5个特征”86.2%柱顶，坐标直接来自CSV，不从柱底斜穿。 |','| 每页字数 / 字号 | 下表列全部可编辑文本去空白字符数、最小字号和备注字数；正文12–13 pt，图注与尺寸10 pt，关键数字22 pt。表格和方法页按块组织。 |','| 数字出处 | R3新增数字均来自R3原文，R2指标与文献图沿用原记录；下列逐页出处及CSV行可复查。 |','| 中期表读回 | 第11/12单元格所有段落完整；第15–21行七行计划逐格匹配原稿；两单元格多余空段落均0；第22行仍为原第四项。r3_form_readback.json记录全文。 |',f"| 中期表篇幅 | 第一项{firstn}字符（去空白和Markdown标记；数字/西文逐字符计），五段正文分别{pc}；数据4条、文献11篇、检索1行；第三项7行；整表4页，WPS字数{form['words']}、字符数{form['chars']}。 |",'| 原件未变 | 两个原件大小、mtime_ns与SHA256前后完全一致，见r3_originals.json及下表；figs/与work/全部只读。 |','| 不导出PDF | 全程仅PPT PNG预览和DOC/DOCX兼容中间件；未导出PDF、未安装包、未调用DSH、未发送heartbeat。 |','','## 禁用词和特征变量扫描','', '范围：PPTX全部幻灯片文本与备注XML（包括表格文本），加中期表Markdown原稿。短字母按“实验代号”语义匹配，参考文献作者首字母和GB/T 7714文献类型[J]/[C]不是实验代号；技术名AdamW、ReLU等不按字母子串误报。型号EVO II Pro V3的大写V3保留为正式型号，不属于城区录音代号。', '', '| 词 / 变量 | 次数 |','|---|---:|']
+lines += [f'| {k} | {v} |' for k,v in counts.items()]
+lines += ['', '## 逐页字符和字号','', '“正文”栏统计问题页五段解释（不含小标题、图注、关键数字重复强调）；表格 / 方法 / 计划页不按单栏叙述计。WPS会对表格单元格与悬挂标点返回少量BoundWidth警告，保留原始记录；逐页PNG核对没有文字裁掉或相互覆盖，未把程序返回成功当作图检替代。', '', '| 页 | 可编辑字符 | 问题正文字符 | 最小字号 pt | 备注字符 |','|---|---:|---:|---:|---:|']
+for d in a:
+ body=sum(len(re.sub(r'\s','',re.sub(r'^[①②③④⑤] [^　]+　','',t))) for t in d['texts'] if re.match(r'^[①②③④⑤] ',t))
+ if d['page'] not in [7,8,9,10,11,13,14]:body=0
+ if d['page']==8:body='审核表＋'+str(body)+'字解释'
+ lines.append(f"| {d['page']} | {d['chars']} | {body or '—'} | {d['min_font']} | {d['note_chars']} |")
+lines += ['', '## 数字出处与用图','', '| 页 | 数字 / 图 | 出处 |','|---|---|', '| 3–5 | 两阶段指标；采样率、频带、谱线、帧数、池化和网络张量；优化器设置与参数量 | R3第3、4、5页；50/90 MHz由频带上下限相减。 |','| 4 | 窗长10–50 ms、1.92%→0.24%、180→40片及两条折线 | R3第4页；R2第16页。重绘使用work/main_W_window_20261110/metrics_summary.csv，精确行号见r3_assets/manifest.json（含背景N行）。 |','| 6 | 97%→49%、99%→低于33%；文献图 | R2第4页及REPORT.md文献裁切表：Soltani PDF p.4–5 Sec.III-D；WiSig p.6 Fig.10；图片原数据不变。 |','| 7 | 85.4%、51.1%、14 ms、1–2 ms、29%、34.8%、2456→2409、100%→0–4% | R3第一项第1段及第7页；R2第7/8页。DroneRFa表4（PDF p.7、刊页1153）、R2已有M100/平移/换信道裁图。 |','| 8 | 3933 / 61 GB、890 / 73 GB、97 / 15 / 25、122.88 MS/s、489 / 173、2426.88与7/32 | R3第一项第2段、第8页；R2第10/11页；谱线原裁图line2426.png。 |','| 9 | 100%、93%、93.2%、0.9%、0.51、0.4%、92%、58%、90% / 57% | R3第9页；R2第12/13页。source_probe按指定原值绘制；背景替换图仅改标题与图例，无改动数据曲线。 |','| 10 | 19段、57条、2342.6–2393.5、2405–2455、≤0.3 dB、61/6、0/1287、0.23%、0.42%、58→62% | R2第14页及R3第10页；镜像频轴2400 MHz来自R3。背景图仅把旧标签改中文，原柱和误差棒不变。 |','| 11 | −5到15 dB、62%→88%/81%、24% / 1.9%；均值标准差 | R3第11页、R2第15页；work/side_L_wifimix_20261110/metrics_paired.csv:43为城区检出，362/364/366/368/370/372/374为七档叠加背景k/n（逐重复合并再求均值与标准差）。Glüge式(3)沿用R2裁图，p.3。 |','| 12 | 19→13→10→5、0.934、0.77–0.91、各特征公式参数 | R3 §1.2和第12页。谱平坦度箱图取R2 mirror_feature.png绘图区，保留分布，仅去掉英文标题与代号、补中文标签，未重新构造数据。 |','| 13 | 24次、2.5%、94.9→89.2→86.2%、5.5和0.4个百分点 | R3第一项第4段、第13页；R2第18页。CSV精确行号和值见下表及r3_assets/fusion_sources.json。 |','| 14 | 99%、2460–2475、6 dB、2–4带、60–68 MHz、21个数据集 | R3第14页、R2第19页；沿用R2 normal.png / merged.png。后者为宽带合并反例，并非正文城区60–68 MHz那段，图注明确区分。 |','| 15 | 100→0、58→85.7、86→85.4、6.3→5.1、1.3→1.3、0.4→4.2、0.6→0；约360 GB / 60余 / 26 / 20 / 100余 | R2第21页；R3第15页。当前结果是对称叠加后重新训练，与第11页单次改进链结果不混用。 |','| 16–18 | 80片、3.7%、约300片、2461 MHz、30 MS/s、第6/165信道、13+7−2≈18、12/14 ms、20/50 ms、10/20/40 MHz、0至−15 dB | R3第16、17、18页，全部为原文指定数值；“约300片”是统计验证所需背景目标，未声称已经采集。 |','','### 融合重绘数据行（行号含表头）','', '| CSV行 | 百分比均值 | 标准差（百分点） |','|---|---:|---:|']
+for r in json.loads((B/'r3_assets/fusion_sources.json').read_text(encoding='utf-8')):lines.append(f"| work/fusionB_B2_20261112/metrics_summary.csv:{r['row']} | {r['value']} | {r['std']} |")
+lines += ['', '## 原件核对','', '| 文件 | 大小（字节） | 修改时间（本机） | SHA256 |','|---|---:|---|---|']
+for name,d in now.items():lines.append(f"| {name} | {d['size']} | {datetime.datetime.fromtimestamp(d['mtime_ns']/1e9).isoformat(' ')} | {d['sha256']} |")
+lines += ['', '## 小问题的处理与复现','', '1. 文献清单要求保留Geirhos的指定论文，同时禁止该英文题名里的词。为同时保留11篇且词命中为0，该条使用中文题名并标明“题名译文”，作者、期刊、年卷期页保留；其余10条沿用原稿字段，未补造缺失卷页。', '2. WPS对原DOC的混合合并表格执行Rows.Add和Selection插行均卡住。仅结束本轮新启动且命令行带/Automation的WPS进程（原有两个非Automation进程未动），将原件只读打开并转换到ppt_build/r3_form_source.docx，在OOXML内复制两行形成r3_form_expanded.docx，再运行fill_form.py的同一填充逻辑（运行时将来源改为此兼容副本、可填行数改为7）。原fill_form.py和原DOC不修改；恢复后4页且回读通过。运行入口r3_expand_doc.py。', '3. 第5页残差块为保证可读采用顶部横向放大框，完整主网络与训练设置均在同页；原生形状可继续编辑。WPS保存后部分文本框高度自动改变，补做第3轮文字边界修复，再对最终PPTX做最小OOXML版式修补并复开导出。第16页分为3块容纳5个问题；第18页按明确指定的2×3六块保留。', '4. 复现使用D:/anaconda/python.exe -I；先r3_form.py、r3_expand_doc.py、r3_verify_form.py；PPT依次r3_figs.py、r3_clean_assets.py、r3_build.py、r3_finalize.py、r3_make_repair.py、r3_repair.py、r3_package.py、r3_reopen.py、r3_density.py、r3_reopen.py、r3_report.py。保存复用R2的WPS兼容COM及关闭后复制方法，未新装库。r3_fill_form_runner.py仅为插行故障诊断，不能作为最终生成入口。', '5. 最终交付已由WPS重新打开为19页；封面和尾页的姓名占位xxx沿用模板，未凭空填写人员信息。']
+(B/'REPORT_R3.md').write_text('\n'.join(lines)+'\n',encoding='utf-8')
+(B/'r3_checks.json').write_text(json.dumps({'forbidden_counts':counts,'network_dimensions':{v:v in net for v in required},'originals_unchanged':orig==now,'form_complete':True,'form_first_chars':firstn,'paragraph_chars':pc,'slides':len(a),'preview_rounds':[1,2,3],'final_size':(D/'中期答辩_模板稿.pptx').stat().st_size},ensure_ascii=False,indent=2),encoding='utf-8')
+print('All checks pass',firstn,pc,'report',B/'REPORT_R3.md')
+
